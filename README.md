@@ -1,22 +1,50 @@
 # Medical Records Management
 
-Cetralized medical records platforms for patiences.
+Centralized medical records platform for patients.
 Patients (and their caregivers) can access health history in one place and grant access to healthcare workers when care is needed.
 
 ## Status
 
-This repo currently contains the **Medical Records Domain** as plain Java, developed using **TDD**.
+This repo currently implements a **patient-owned medical record** as plain Java, developed with **TDD**.
 
-There's no persistence, REST API, or application/infrastructure layer yet.
+What exists today:
 
-| Item | Detail                                                                                           |
-|------|--------------------------------------------------------------------------------------------------|
-| Architecture style | Microservices (starting with Medical Records)                                                    |
-| Design | Domain-Driven Design — domain first                                                              |
-| Language | Java 21                                                                                          |
-| Build | Maven (multi-module)                                                                             |
-| Tests | JUnit 5 + AssertJ + Mockito                                                                      |
-| Coverage | JaCoCo (minimum **80%** line coverage on `verify`), enforces **100%** of Critical Domain Methods |
+- **Domain layer** — `MedicalRecord` aggregate, clinical entries, access grants, typed IDs
+- **Application layer** — `MedicalRecordApplicationService` (load → mutate → save)
+- **Infrastructure (in-memory)** — `InMemoryMedicalRecordRepository`
+
+There is still **no** database, REST API, or identity service.
+
+| Item | Detail |
+|------|--------|
+| Architecture style | Microservices (starting with Medical Records) |
+| Design | Domain-Driven Design — domain first |
+| Language | Java 26 |
+| Build | Maven (single module) |
+| Tests | JUnit 5 + AssertJ + Mockito |
+| Persistence | In-memory repository (swap-ready port) |
+
+## How it works
+
+Each command follows the same pattern:
+
+```text
+application service
+  → MedicalRecordRepository.findByPatientId(...)
+  → MedicalRecord.<domain action>(...)
+  → MedicalRecordRepository.save(...)
+```
+
+Supported application commands:
+
+- Create medical record for a patient
+- Grant / revoke caregiver access
+- Share with a healthcare worker
+- Add professional entry
+- Add external entry (e.g. uploaded PDF)
+- Amend entry (append-only version with reason)
+- Mark / clear special needs
+- Get medical record by patient ID
 
 ## Domain Model (Medical Record)
 
@@ -40,20 +68,39 @@ Identities live outside this service (future Identity Service). The domain only 
 - **Amendments** — append-only versions; every amendment requires a non-blank reason; prior versions remain readable
 - **Special needs marker** — lightweight hook for future analytics (e.g. atypical baseline lab parameters)
 
-### Main packages
+### Package layout
 
+```text
+org.ficha
+├── application/                      # Use cases / application service
+│   ├── MedicalRecordApplicationService
+│   └── MedicalRecordNotFoundException
+├── domain/
+│   ├── model/                        # MedicalRecord, ClinicalEntry, EntryVersion, …
+│   ├── model.ids/                    # Typed IDs
+│   ├── model.source/                 # ProfessionalSource, ExternalSource
+│   ├── repository/                   # MedicalRecordRepository (port)
+│   └── exceptions/                   # Domain exceptions
+└── infrastructure/
+    └── persistence/                  # InMemoryMedicalRecordRepository (adapter)
 ```
-org.ficha.domain
-|--- model/           # MedicalRecord, ClinicalEntry, EntryVersion, EntryContent, …
-|--- model.ids/       # Typed IDs
-|--- model.source/    # ProfessionalSource, ExternalSource
-|--- exception/       # Domain exceptions
+
+## Running tests
+
+Requires **Java 26** and Maven:
+
+```bash
+mvn test
 ```
+
+Application-service tests mock `MedicalRecordRepository` with Mockito.
+Repository tests exercise the in-memory adapter directly.
 
 ## Out of scope (for now)
 
-- Persistence (database, file system, etc.)
+- Durable persistence (database)
 - REST API (HTTP endpoints)
-- Application layer (services, use cases)
-- Infrastructure layer (messaging, logging, monitoring, etc.)
-- Identity management (authentication, authorization, user management)
+- Messaging, logging, monitoring
+- Identity management (authentication / user directory)
+- FHIR-typed clinical events / episode graph (timeline model)
+- Scoped grants, expiry, and read-audit history

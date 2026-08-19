@@ -10,15 +10,15 @@ This repo currently implements a **patient-owned medical record** as plain Java,
 What exists today:
 
 - **Domain layer** — `MedicalRecord` aggregate, clinical entries, access grants, typed IDs
-- **Application layer** — `MedicalRecordApplicationService` (load → mutate → save)
+- **Application layer** — UseCase-oriented application layer (see below). For backward compatibility a thin `MedicalRecordApplicationService` façade is kept (it delegates to the UseCases).
 - **Infrastructure (in-memory)** — `InMemoryMedicalRecordRepository`
 
 There is still **no** database, REST API, or identity service.
 
 | Item | Detail |
 |------|--------|
-| Architecture style | Microservices (starting with Medical Records) |
-| Design | Domain-Driven Design — domain first |
+| Architecture style | Clean Architecture / DDD (UseCase-driven application layer) |
+| Design | Domain-Driven Design — domain first; UseCase pattern in application layer |
 | Language | Java 26 |
 | Build | Maven (single module) |
 | Tests | JUnit 5 + AssertJ + Mockito |
@@ -26,16 +26,39 @@ There is still **no** database, REST API, or identity service.
 
 ## How it works
 
-Each command follows the same pattern:
+The application layer was refactored to follow the UseCase pattern. Each business action is implemented as a dedicated UseCase class that:
+
+- validates input
+- loads the aggregate through the repository port
+- delegates domain mutations to the aggregate
+- persists changes through the repository
+
+A typical flow:
 
 ```text
-application service
-  → MedicalRecordRepository.findByPatientId(...)
-  → MedicalRecord.<domain action>(...)
-  → MedicalRecordRepository.save(...)
+controller / adapter
+  → UseCase<Request>.execute(request)
+    → MedicalRecordRepository.findByPatientId(...)
+    → MedicalRecord.<domain action>(...)
+    → MedicalRecordRepository.save(...)
 ```
 
-Supported application commands:
+To preserve existing code and adapters, `MedicalRecordApplicationService` remains available as a thin façade that simply delegates to the UseCase implementations. Keep this service thin: it should not contain domain logic, only delegation and cross-cutting concerns (transactions, logging) when necessary.
+
+Supported application UseCases (classes under `org.ficha.application.usecase`):
+
+- CreateMedicalRecordUseCase
+- GetMedicalRecordUseCase
+- GrantCaregiverAccessUseCase
+- RevokeCaregiverAccessUseCase
+- ShareWithHealthcareWorkerUseCase
+- AddProfessionalEntryUseCase
+- AddExternalEntryUseCase
+- AmendEntryUseCase
+- MarkSpecialNeedsUseCase
+- ClearSpecialNeedsUseCase
+
+Supported application commands (API surface, still available on `MedicalRecordApplicationService`):
 
 - Create medical record for a patient
 - Grant / revoke caregiver access
@@ -72,8 +95,9 @@ Identities live outside this service (future Identity Service). The domain only 
 
 ```text
 org.ficha
-├── application/                      # Use cases / application service
-│   ├── MedicalRecordApplicationService
+├── application/                      # Use cases, façade, and application exceptions
+│   ├── usecase/                       # Individual UseCase classes (UseCase pattern)
+│   ├── MedicalRecordApplicationService # Thin façade kept for backward compatibility
 │   └── MedicalRecordNotFoundException
 ├── domain/
 │   ├── model/                        # MedicalRecord, ClinicalEntry, EntryVersion, …
@@ -93,8 +117,14 @@ Requires **Java 26** and Maven:
 mvn test
 ```
 
-Application-service tests mock `MedicalRecordRepository` with Mockito.
-Repository tests exercise the in-memory adapter directly.
+Application-layer tests mock `MedicalRecordRepository` with Mockito. Unit tests can target UseCase classes directly — this is recommended because each UseCase implements a single business action and is easy to test in isolation.
+
+## Rationale for the refactor
+
+- UseCase pattern makes the application boundary explicit and gives each business action a single responsibility.
+- Easier testing: each UseCase is unit-test friendly (inject repository mocks).
+- Better separation: domain logic stays inside aggregates; application layer becomes orchestration only.
+- Compatibility: keeping the `MedicalRecordApplicationService` façade avoids breaking existing adapters/controllers while migrating to the UseCase style.
 
 ## Out of scope (for now)
 

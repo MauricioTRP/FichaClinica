@@ -1,5 +1,15 @@
 package org.ficha.application;
 
+import org.ficha.application.usecase.AddExternalEntryUseCase;
+import org.ficha.application.usecase.AddProfessionalEntryUseCase;
+import org.ficha.application.usecase.AmendEntryUseCase;
+import org.ficha.application.usecase.ClearSpecialNeedsUseCase;
+import org.ficha.application.usecase.CreateMedicalRecordUseCase;
+import org.ficha.application.usecase.GetMedicalRecordUseCase;
+import org.ficha.application.usecase.GrantCaregiverAccessUseCase;
+import org.ficha.application.usecase.MarkSpecialNeedsUseCase;
+import org.ficha.application.usecase.RevokeCaregiverAccessUseCase;
+import org.ficha.application.usecase.ShareWithHealthcareWorkerUseCase;
 import org.ficha.domain.model.ClinicalEntry;
 import org.ficha.domain.model.EntryContent;
 import org.ficha.domain.model.MedicalRecord;
@@ -14,53 +24,50 @@ import org.ficha.domain.repository.MedicalRecordRepository;
 import java.util.Objects;
 
 /**
- * Application boundary for medical-record commands.
- *
- * Each command loads the aggregate, delegates validation and mutation to it,
- * and saves the resulting state through the repository.
+ * Thin application façade that delegates each command to a dedicated UseCase.
+ * This keeps the public API stable while the application layer becomes more
+ * aligned with Clean Architecture and the UseCase pattern.
  */
 public final class MedicalRecordApplicationService {
-    private final MedicalRecordRepository repository;
+    private final CreateMedicalRecordUseCase createMedicalRecordUseCase;
+    private final GetMedicalRecordUseCase getMedicalRecordUseCase;
+    private final GrantCaregiverAccessUseCase grantCaregiverAccessUseCase;
+    private final RevokeCaregiverAccessUseCase revokeCaregiverAccessUseCase;
+    private final ShareWithHealthcareWorkerUseCase shareWithHealthcareWorkerUseCase;
+    private final AddProfessionalEntryUseCase addProfessionalEntryUseCase;
+    private final AddExternalEntryUseCase addExternalEntryUseCase;
+    private final AmendEntryUseCase amendEntryUseCase;
+    private final MarkSpecialNeedsUseCase markSpecialNeedsUseCase;
+    private final ClearSpecialNeedsUseCase clearSpecialNeedsUseCase;
 
-    public MedicalRecordApplicationService(MedicalRecordRepository repository) {
-        this.repository = Objects.requireNonNull(repository, "repository must not be null");
+    public MedicalRecordApplicationService(MedicalRecordRepository repo) {
+        MedicalRecordRepository repository = Objects.requireNonNull(repo, "repository must not be null");
+        this.createMedicalRecordUseCase = new CreateMedicalRecordUseCase(repository);
+        this.getMedicalRecordUseCase = new GetMedicalRecordUseCase(repository);
+        this.grantCaregiverAccessUseCase = new GrantCaregiverAccessUseCase(repository);
+        this.revokeCaregiverAccessUseCase = new RevokeCaregiverAccessUseCase(repository);
+        this.shareWithHealthcareWorkerUseCase = new ShareWithHealthcareWorkerUseCase(repository);
+        this.addProfessionalEntryUseCase = new AddProfessionalEntryUseCase(repository);
+        this.addExternalEntryUseCase = new AddExternalEntryUseCase(repository);
+        this.amendEntryUseCase = new AmendEntryUseCase(repository);
+        this.markSpecialNeedsUseCase = new MarkSpecialNeedsUseCase(repository);
+        this.clearSpecialNeedsUseCase = new ClearSpecialNeedsUseCase(repository);
     }
 
     public MedicalRecord createFor(PatientId patientId) {
-        Objects.requireNonNull(patientId, "patientId must not be null");
-        if (repository.existsByPatientId(patientId)) {
-            throw new IllegalStateException(
-                    "Patient already has a medical record: " + patientId.value()
-            );
-        }
-
-        MedicalRecord medicalRecord = MedicalRecord.createFor(patientId);
-        repository.save(medicalRecord);
-        return medicalRecord;
+        return createMedicalRecordUseCase.execute(new CreateMedicalRecordUseCase.Request(patientId));
     }
 
     public MedicalRecord getByPatientId(PatientId patientId) {
-        Objects.requireNonNull(patientId, "patientId must not be null");
-        return repository.findByPatientId(patientId)
-                .orElseThrow(() -> new MedicalRecordNotFoundException(patientId));
+        return getMedicalRecordUseCase.execute(new GetMedicalRecordUseCase.Request(patientId));
     }
 
-    public void grantCaregiverAccess(
-            PatientId patientId,
-            CaregiverId caregiverId
-    ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        medicalRecord.grantCaregiverAccess(patientId, caregiverId);
-        repository.save(medicalRecord);
+    public void grantCaregiverAccess(PatientId patientId, CaregiverId caregiverId) {
+        grantCaregiverAccessUseCase.execute(new GrantCaregiverAccessUseCase.Request(patientId, caregiverId));
     }
 
-    public void revokeCaregiverAccess(
-            PatientId patientId,
-            CaregiverId caregiverId
-    ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        medicalRecord.revokeCaregiverAccess(patientId, caregiverId);
-        repository.save(medicalRecord);
+    public void revokeCaregiverAccess(PatientId patientId, CaregiverId caregiverId) {
+        revokeCaregiverAccessUseCase.execute(new RevokeCaregiverAccessUseCase.Request(patientId, caregiverId));
     }
 
     public void shareWithHealthcareWorker(
@@ -68,9 +75,9 @@ public final class MedicalRecordApplicationService {
             CaregiverId caregiverId,
             HealthcareWorkerId workerId
     ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        medicalRecord.shareWithHealthcareWorker(caregiverId, workerId);
-        repository.save(medicalRecord);
+        shareWithHealthcareWorkerUseCase.execute(
+                new ShareWithHealthcareWorkerUseCase.Request(patientId, caregiverId, workerId)
+        );
     }
 
     public ClinicalEntry addProfessionalEntry(
@@ -78,10 +85,9 @@ public final class MedicalRecordApplicationService {
             HealthcareWorkerId workerId,
             EntryContent content
     ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        ClinicalEntry entry = medicalRecord.addProfessionalEntry(workerId, content);
-        repository.save(medicalRecord);
-        return entry;
+        return addProfessionalEntryUseCase.execute(
+                new AddProfessionalEntryUseCase.Request(patientId, workerId, content)
+        );
     }
 
     public ClinicalEntry addExternalEntry(
@@ -90,10 +96,9 @@ public final class MedicalRecordApplicationService {
             ExternalSource source,
             EntryContent content
     ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        ClinicalEntry entry = medicalRecord.addExternalEntry(uploaderId, source, content);
-        repository.save(medicalRecord);
-        return entry;
+        return addExternalEntryUseCase.execute(
+                new AddExternalEntryUseCase.Request(patientId, uploaderId, source, content)
+        );
     }
 
     public ClinicalEntry amendEntry(
@@ -103,28 +108,16 @@ public final class MedicalRecordApplicationService {
             EntryContent content,
             String reason
     ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        ClinicalEntry entry = medicalRecord.amendEntry(workerId, entryId, content, reason);
-        repository.save(medicalRecord);
-        return entry;
+        return amendEntryUseCase.execute(
+                new AmendEntryUseCase.Request(patientId, workerId, entryId, content, reason)
+        );
     }
 
-    public void markSpecialNeeds(
-            PatientId patientId,
-            ActorId actorId,
-            String notes
-    ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        medicalRecord.markSpecialNeeds(actorId, notes);
-        repository.save(medicalRecord);
+    public void markSpecialNeeds(PatientId patientId, ActorId actorId, String notes) {
+        markSpecialNeedsUseCase.execute(new MarkSpecialNeedsUseCase.Request(patientId, actorId, notes));
     }
 
-    public void clearSpecialNeeds(
-            PatientId patientId,
-            ActorId actorId
-    ) {
-        MedicalRecord medicalRecord = getByPatientId(patientId);
-        medicalRecord.clearSpecialNeeds(actorId);
-        repository.save(medicalRecord);
+    public void clearSpecialNeeds(PatientId patientId, ActorId actorId) {
+        clearSpecialNeedsUseCase.execute(new ClearSpecialNeedsUseCase.Request(patientId, actorId));
     }
 }
